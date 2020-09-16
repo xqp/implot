@@ -147,7 +147,7 @@ struct ImBufferWriter
 
 // Fixed size point array
 template <int N>
-struct ImPlotPointArray {
+struct ImPlotPoints {
     inline ImPlotPoint&       operator[](int i)       { return Data[i]; }
     inline const ImPlotPoint& operator[](int i) const { return Data[i]; }
     inline int Size()                                 { return N; }

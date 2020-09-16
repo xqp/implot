@@ -1416,7 +1416,7 @@ namespace ImPlot {
 
 struct BenchData {
     BenchData() {
-        float y = RandomRange(0.0f,1.0f);
+        float y = RandomRange(0.01f,0.99f);
         Data = new float[1000];
         for (int i = 0; i < 1000; ++i) {
             Data[i] = y + RandomRange(-0.01f,0.01f);
@@ -1499,7 +1499,7 @@ void ShowBenchmarkTool() {
 
     ImGui::ProgressBar((float)L / (float)(max_items - 1));
 
-    ImPlot::SetNextPlotLimits(0,1000,0,1,ImGuiCond_Always);
+    ImPlot::SetNextPlotLimits(0,1000,0,1);
     if (ImPlot::BeginPlot("##Bench",NULL,NULL,ImVec2(-1,0),ImPlotFlags_NoChild | ImPlotFlags_CanvasOnly,ImPlotAxisFlags_NoDecorations,ImPlotAxisFlags_NoDecorations)) {
         if (running) {
             if (mode == BenchMode::Line) {
@@ -1529,7 +1529,8 @@ void ShowBenchmarkTool() {
             else if (mode == BenchMode::Bars) {
                 for (int i = 0; i < L; ++i) {
                     ImGui::PushID(i);
-                    ImPlot::SetNextFillStyle(items[i].Col,0.5f);
+                    ImPlot::SetNextLineStyle(items[i].Col,0);
+                    ImPlot::SetNextFillStyle(items[i].Col, 0.5f);
                     ImPlot::PlotBars("##item", items[i].Data, 1000);
                     ImGui::PopID();
                 }
