@@ -66,9 +66,8 @@ namespace ImPlot {
 
 void ShowBenchmarkTool();
 
-template <typename T>
-inline T RandomRange(T min, T max) {
-    T scale = rand() / (T) RAND_MAX;
+inline double RandomRange(double min, double max) {
+    double scale = rand() / (double) RAND_MAX;
     return min + scale * ( max - min );
 }
 
@@ -1414,17 +1413,19 @@ namespace ImPlot {
 // BENCHMARK
 //-----------------------------------------------------------------------------
 
+typedef float bench_t;
+
 struct BenchData {
     BenchData() {
-        float y = RandomRange(0.01f,0.99f);
-        Data = new float[1000];
+        bench_t y = (bench_t)RandomRange(10.0f,990.0f);
+        Data = new bench_t[1000];
         for (int i = 0; i < 1000; ++i) {
-            Data[i] = y + RandomRange(-0.01f,0.01f);
+            Data[i] = y + (bench_t)RandomRange(-10.0f,10.0f);
         }
         Col = ImVec4(RandomRange(0.0f,1.0f),RandomRange(0.0f,1.0f),RandomRange(0.0f,1.0f),0.5f);
     }
     ~BenchData() { delete[] Data; }
-    float* Data;
+    bench_t* Data;
     ImVec4 Col;
 };
 
@@ -1438,19 +1439,29 @@ enum BenchMode {
 struct BenchRecord {
     int Mode;
     bool AA;
+    bool G;
     ImVector<ImPlotPoint> Data;
 };
 
+ImPlotPoint BenchGetter1(void* data, int i) {
+    return ImPlotPoint(i, ((bench_t*)data)[i]);
+}
+
+ImPlotPoint BenchGetter2(void*, int i) {
+    return ImPlotPoint(i, 0);
+}
+
 void ShowBenchmarkTool() {
     static const int max_items = 500;
-    static BenchData items[max_items];
-    static bool running = false;
-    static int frames   = 60;
-    static int L        = 0;
-    static int F        = 0;
-    static double t1, t2;
-    static int mode     = BenchMode::Line;
-    const char* names[] = {"Line","Shaded","Scatter","Bars"};
+    static bool running        = false;
+    static int frames          = 60;
+    static int L               = 0;
+    static int F               = 0;
+    static double t1, t2; 
+    static int mode            = BenchMode::Line;
+    static bool G              = false;
+    const char* names[]        = {"Line","Shaded","Scatter","Bars"};
+    static BenchData           items[max_items];
 
     static ImVector<BenchRecord> records;
 
@@ -1487,26 +1498,31 @@ void ShowBenchmarkTool() {
         records.back().Data.reserve(max_items+1);
         records.back().Mode = mode;
         records.back().AA   = ImPlot::GetStyle().AntiAliasedLines;
+        records.back().G    = G;
         t1 = ImGui::GetTime();
     }
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(200);
+    ImGui::SetNextItemWidth(150);
     ImGui::Combo("##Mode",&mode,names,4);
     ImGui::SameLine();
 
-    ImGui::Checkbox("Anti-Aliased Lines", &ImPlot::GetStyle().AntiAliasedLines);
+    ImGui::Checkbox("G", &G);
+    ImGui::SameLine();
+
+    ImGui::Checkbox("AA", &ImPlot::GetStyle().AntiAliasedLines);
     if (was_running) { ImGui::PopItemFlag(); ImGui::PopStyleVar(); }
 
     ImGui::ProgressBar((float)L / (float)(max_items - 1));
 
-    ImPlot::SetNextPlotLimits(0,1000,0,1);
+    ImPlot::SetNextPlotLimits(0,1000,0,1000, ImGuiCond_Always);
     if (ImPlot::BeginPlot("##Bench",NULL,NULL,ImVec2(-1,0),ImPlotFlags_NoChild | ImPlotFlags_CanvasOnly,ImPlotAxisFlags_NoDecorations,ImPlotAxisFlags_NoDecorations)) {
         if (running) {
             if (mode == BenchMode::Line) {
                 for (int i = 0; i < L; ++i) {
                     ImGui::PushID(i);
                     ImPlot::SetNextLineStyle(items[i].Col);
-                    ImPlot::PlotLine("##item", items[i].Data, 1000);
+                    G ? ImPlot::PlotLineG("##item", BenchGetter1, items[i].Data, 1000) 
+                      : ImPlot::PlotLine("##item", items[i].Data, 1000);
                     ImGui::PopID();
                 }
             }
@@ -1514,7 +1530,8 @@ void ShowBenchmarkTool() {
                 for (int i = 0; i < L; ++i) {
                     ImGui::PushID(i);
                     ImPlot::SetNextFillStyle(items[i].Col,0.5f);
-                    ImPlot::PlotShaded("##item", items[i].Data, 1000);
+                    G ? ImPlot::PlotShadedG("##item", BenchGetter1, items[i].Data, BenchGetter2, NULL, 1000) 
+                      : ImPlot::PlotShaded("##item", items[i].Data, 1000);
                     ImGui::PopID();
                 }
             }
@@ -1522,7 +1539,8 @@ void ShowBenchmarkTool() {
                 for (int i = 0; i < L; ++i) {
                     ImGui::PushID(i);
                     ImPlot::SetNextLineStyle(items[i].Col);
-                    ImPlot::PlotScatter("##item", items[i].Data, 1000);
+                    G ? ImPlot::PlotScatterG("##item", BenchGetter1, items[i].Data, 1000) 
+                      : ImPlot::PlotScatter("##item", items[i].Data, 1000);
                     ImGui::PopID();
                 }
             }
@@ -1531,7 +1549,8 @@ void ShowBenchmarkTool() {
                     ImGui::PushID(i);
                     ImPlot::SetNextLineStyle(items[i].Col,0);
                     ImPlot::SetNextFillStyle(items[i].Col, 0.5f);
-                    ImPlot::PlotBars("##item", items[i].Data, 1000);
+                    G ? ImPlot::PlotBarsG("##item", BenchGetter1, items[i].Data, 1000, 0.67) 
+                      : ImPlot::PlotBars("##item", items[i].Data, 1000);
                     ImGui::PopID();
                 }
             }
@@ -1543,7 +1562,7 @@ void ShowBenchmarkTool() {
     if (ImPlot::BeginPlot("##Stats", "Items (1,000 pts each)", "Framerate (Hz)", ImVec2(-1,0), ImPlotFlags_NoChild)) {
         for (int run = 0; run < records.size(); ++run) {
             if (records[run].Data.Size > 1) {
-                sprintf(buffer, "B%d-%s%s", run + 1, names[records[run].Mode], records[run].AA ? "-AA" : "");
+                sprintf(buffer, "B%d-Plot%s%s%s", run + 1, names[records[run].Mode], records[run].G ? "G" : "", records[run].AA ? "-AA" : "");
                 ImVector<ImPlotPoint>& d = records[run].Data;
                 ImPlot::PlotLine(buffer, &d[0].x, &d[0].y, d.Size, 0, 2*sizeof(double));
             }
