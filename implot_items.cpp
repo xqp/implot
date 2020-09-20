@@ -125,6 +125,13 @@ void SetNextErrorBarStyle(const ImVec4& col, float size, float weight) {
     gp.NextItemData.ErrorBarWeight             = weight;
 }
 
+ImVec4 GetLastItemColor() {
+    ImPlotContext& gp = *GImPlot;
+    if (gp.PreviousItem)
+        return gp.PreviousItem->Color;
+    return ImVec4();
+}
+
 void HideNextItem(bool hidden, ImGuiCond cond) {
     ImPlotContext& gp = *GImPlot;
     gp.NextItemData.HasHidden  = true;
@@ -151,29 +158,29 @@ bool BeginItem(const char* label_id, ImPlotCol recolor_from) {
     IM_ASSERT_USER_ERROR(gp.CurrentPlot != NULL, "PlotX() needs to be called between BeginPlot() and EndPlot()!");
     bool just_created;
     ImPlotItem* item = RegisterOrGetItem(label_id, &just_created);
-
+    // set current item
+    gp.CurrentItem = item;
+    ImPlotNextItemData& s = gp.NextItemData;
+    // override item color
+    if (recolor_from != -1) {
+        if (!IsColorAuto(s.Colors[recolor_from]))
+            item->Color = s.Colors[recolor_from];
+        else if (!IsColorAuto(gp.Style.Colors[recolor_from]))
+            item->Color = gp.Style.Colors[recolor_from];
+    }
     // hide/show item
     if (gp.NextItemData.HasHidden) {
         if (just_created || gp.NextItemData.HiddenCond == ImGuiCond_Always)
             item->Show = !gp.NextItemData.Hidden;
     }
-
     if (!item->Show) {
         // reset next item data
         gp.NextItemData = ImPlotNextItemData();
+        gp.PreviousItem = item;
+        gp.CurrentItem  = NULL;
         return false;
     }
     else {
-        // set current item
-        gp.CurrentItem = item;
-        ImPlotNextItemData& s = gp.NextItemData;
-        // override item color
-        if (recolor_from != -1) {
-            if (!IsColorAuto(s.Colors[recolor_from]))
-                item->Color = s.Colors[recolor_from];
-            else if (!IsColorAuto(gp.Style.Colors[recolor_from]))
-                item->Color = gp.Style.Colors[recolor_from];
-        }
         // stage next item colors
         s.Colors[ImPlotCol_Line]           = IsColorAuto(s.Colors[ImPlotCol_Line])          ? ( IsColorAuto(ImPlotCol_Line)           ? item->Color                : gp.Style.Colors[ImPlotCol_Line]          ) : s.Colors[ImPlotCol_Line];
         s.Colors[ImPlotCol_Fill]           = IsColorAuto(s.Colors[ImPlotCol_Fill])          ? ( IsColorAuto(ImPlotCol_Fill)           ? item->Color                : gp.Style.Colors[ImPlotCol_Fill]          ) : s.Colors[ImPlotCol_Fill];
@@ -218,7 +225,8 @@ void EndItem() {
     // reset next item data
     gp.NextItemData = ImPlotNextItemData();
     // set current item
-    gp.CurrentItem = NULL;
+    gp.PreviousItem = gp.CurrentItem;
+    gp.CurrentItem  = NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -1776,6 +1784,27 @@ void PlotRects(const char* label_id, const double* xs, const double* ys, int cou
 void PlotRects(const char* label_id, ImPlotPoint (*getter_func)(void* data, int idx), void* data, int count, int offset) {
     Getter1_FuncPtr getter(getter_func,data,count,offset);
     return PlotRectsEx(label_id, getter);
+}
+
+//-----------------------------------------------------------------------------
+// PLOT IMAGE
+//-----------------------------------------------------------------------------
+
+void PlotImage(const char* label_id, ImTextureID user_texture_id, const ImPlotPoint& bmin, const ImPlotPoint& bmax, const ImVec2& uv0, const ImVec2& uv1, const ImVec4& tint_col) {
+    if (BeginItem(label_id)) {
+        if (FitThisFrame()) {
+            FitPoint(bmin);
+            FitPoint(bmax);
+        }
+        GetCurrentItem()->Color = tint_col;
+        ImDrawList& DrawList = *GetPlotDrawList();
+        ImVec2 p1 = PlotToPixels(bmin.x, bmax.y);
+        ImVec2 p2 = PlotToPixels(bmax.x, bmin.y);
+        PushPlotClipRect();
+        DrawList.AddImage(user_texture_id, p1, p2, uv0, uv1, ImGui::ColorConvertFloat4ToU32(tint_col));
+        PopPlotClipRect();
+        EndItem();
+    }
 }
 
 //-----------------------------------------------------------------------------

@@ -77,9 +77,9 @@ extern IMPLOT_API ImPlotContext* GImPlot; // Current implicit context pointer
 #define IMPLOT_SUB_DIV    10
 // Zoom rate for scroll (e.g. 0.1f = 10% plot range every scroll click)
 #define IMPLOT_ZOOM_RATE  0.1f
-// Maximum allowable timestamp value 01/01/3000 @ 12:00am (UTC)
+// Mimimum allowable timestamp value 01/01/1970 @ 12:00am (UTC) (DO NOT DECREASE THIS)
 #define IMPLOT_MIN_TIME 0
-// Maximum allowable timestamp value 01/01/3000 @ 12:00am (UTC)
+// Maximum allowable timestamp value 01/01/3000 @ 12:00am (UTC) (DO NOT INCREASE THIS)
 #define IMPLOT_MAX_TIME 32503680000
 
 //-----------------------------------------------------------------------------
@@ -135,7 +135,7 @@ struct ImBufferWriter
         Pos = 0;
     }
 
-    void Write(const char* fmt, ...) IM_FMTARGS(2) {
+    void Write(const char* fmt, ...) {
         va_list argp;
         va_start(argp, fmt);
         const int written = ::vsnprintf(&Buffer[Pos], Size - Pos - 1, fmt, argp);
@@ -187,6 +187,7 @@ enum ImPlotTimeFmt_ {
     ImPlotTimeFmt_SUs,             // :29.428 552
     ImPlotTimeFmt_SMs,             // :29.428
     ImPlotTimeFmt_S,               // :29
+    ImPlotTimeFmt_HrMinSMs,        // 7:21:29.428pm (19:21:29.428)
     ImPlotTimeFmt_HrMinS,          // 7:21:29pm (19:21:29)
     ImPlotTimeFmt_HrMin,           // 7:21pm (19:21)
     ImPlotTimeFmt_Hr,              // 7pm (19:00)
@@ -246,9 +247,58 @@ struct ImPlotColormapMod {
 struct ImPlotPointError
 {
     double X, Y, Neg, Pos;
-
     ImPlotPointError(double x, double y, double neg, double pos) {
         X = x; Y = y; Neg = neg; Pos = pos;
+    }
+};
+
+// Interior plot label/annotation
+struct ImPlotAnnotation {
+    ImVec2 Pos;
+    ImVec2 Offset;
+    ImU32  ColorBg;
+    ImU32  ColorFg;
+    int    TextOffset;
+    bool   Clamp;
+};
+
+// Collection of plot labels
+struct ImPlotAnnotationCollection {
+
+    ImVector<ImPlotAnnotation> Annotations;
+    ImGuiTextBuffer            TextBuffer;
+    int                        Size;
+
+    ImPlotAnnotationCollection() { Reset(); }
+
+    void AppendV(const ImVec2& pos, const ImVec2& off, ImU32 bg, ImU32 fg, bool clamp, const char* fmt,  va_list args) IM_FMTLIST(7) {
+        ImPlotAnnotation an;
+        an.Pos = pos; an.Offset = off;
+        an.ColorBg = bg; an.ColorFg = fg;
+        an.TextOffset = TextBuffer.size();
+        an.Clamp = clamp;
+        Annotations.push_back(an);
+        TextBuffer.appendfv(fmt, args);
+        const char nul[] = "";
+        TextBuffer.append(nul,nul+1);
+        Size++;
+    }
+
+    void Append(const ImVec2& pos, const ImVec2& off, ImU32 bg, ImU32 fg, bool clamp, const char* fmt,  ...) IM_FMTARGS(7) {
+        va_list args;
+        va_start(args, fmt);
+        AppendV(pos, off, bg, fg, clamp, fmt, args);
+        va_end(args);
+    }
+
+    const char* GetText(int idx) {
+        return TextBuffer.Buf.Data + Annotations[idx].TextOffset;
+    }
+
+    void Reset() {
+        Annotations.shrink(0);
+        TextBuffer.Buf.shrink(0);
+        Size = 0;
     }
 };
 
@@ -258,7 +308,7 @@ struct ImPlotTick
     double PlotPos;
     float  PixelPos;
     ImVec2 LabelSize;
-    int    BufferOffset;
+    int    TextOffset;
     bool   Major;
     bool   ShowLabel;
     int    Level;
@@ -267,7 +317,7 @@ struct ImPlotTick
         PlotPos      = value;
         Major        = major;
         ShowLabel    = show_label;
-        BufferOffset = -1;
+        TextOffset   = -1;
         Level        = 0;
     }
 };
@@ -275,14 +325,16 @@ struct ImPlotTick
 // Collection of ticks
 struct ImPlotTickCollection {
     ImVector<ImPlotTick> Ticks;
-    ImGuiTextBuffer      Labels;
+    ImGuiTextBuffer      TextBuffer;
     float                TotalWidth;
     float                TotalHeight;
     float                MaxWidth;
     float                MaxHeight;
     int                  Size;
 
-    void AddTick(const ImPlotTick& tick) {
+    ImPlotTickCollection() { Reset(); }
+
+    void Append(const ImPlotTick& tick) {
         if (tick.ShowLabel) {
             TotalWidth  += tick.ShowLabel ? tick.LabelSize.x : 0;
             TotalHeight += tick.ShowLabel ? tick.LabelSize.y : 0;
@@ -293,24 +345,23 @@ struct ImPlotTickCollection {
         Size++;
     }
 
-    void AddTick(double value, bool major, bool show_label, void (*labeler)(ImPlotTick& tick, ImGuiTextBuffer& buf)) {
+    void Append(double value, bool major, bool show_label, void (*labeler)(ImPlotTick& tick, ImGuiTextBuffer& buf)) {
         ImPlotTick tick(value, major, show_label);
         if (labeler)
-            labeler(tick, Labels);
-        AddTick(tick);
+            labeler(tick, TextBuffer);
+        Append(tick);
     }
 
-    const char* GetLabel(int idx) {
-        return Labels.Buf.Data + Ticks[idx].BufferOffset;
+    const char* GetText(int idx) {
+        return TextBuffer.Buf.Data + Ticks[idx].TextOffset;
     }
 
     void Reset() {
         Ticks.shrink(0);
-        Labels.Buf.shrink(0);
+        TextBuffer.Buf.shrink(0);
         TotalWidth = TotalHeight = MaxWidth = MaxHeight = 0;
         Size = 0;
     }
-
 };
 
 // Axis state information that must persist after EndPlot
@@ -543,6 +594,7 @@ struct ImPlotContext {
     ImPool<ImPlotState> Plots;
     ImPlotState*        CurrentPlot;
     ImPlotItem*         CurrentItem;
+    ImPlotItem*         PreviousItem;
 
     // Legend
     ImVector<int>   LegendIndices;
@@ -563,6 +615,9 @@ struct ImPlotContext {
     ImPlotTickCollection XTicks;
     ImPlotTickCollection YTicks[IMPLOT_Y_AXES];
     float                YAxisReference[IMPLOT_Y_AXES];
+
+    // Annotation and User Labels
+    ImPlotAnnotationCollection Annotations;
 
     // Transformations and Data Extents
     ImPlotScale Scales[IMPLOT_Y_AXES];
@@ -766,6 +821,15 @@ IMPLOT_API void AddTextVertical(ImDrawList *DrawList, ImVec2 pos, ImU32 col, con
 inline ImVec2 CalcTextSizeVertical(const char *text) { ImVec2 sz = ImGui::CalcTextSize(text); return ImVec2(sz.y, sz.x); }
 // Returns white or black text given background color
 inline ImU32 CalcTextColor(const ImVec4& bg) { return (bg.x * 0.299 + bg.y * 0.587 + bg.z * 0.114) > 0.729 ? IM_COL32_BLACK : IM_COL32_WHITE; }
+
+// Clamps a label position so that it fits a rect defined by Min/Max
+inline ImVec2 ClampLabelPos(ImVec2 pos, const ImVec2& size, const ImVec2& Min, const ImVec2& Max) {
+    if (pos.x < Min.x)              pos.x = Min.x;
+    if (pos.y < Min.y)              pos.y = Min.y;
+    if ((pos.x + size.x) > Max.x)   pos.x = Max.x - size.x;
+    if ((pos.y + size.y) > Max.y)   pos.y = Max.y - size.y;
+    return pos;
+}
 
 //-----------------------------------------------------------------------------
 // [SECTION] Math and Misc Utils
