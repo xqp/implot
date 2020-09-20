@@ -66,9 +66,9 @@ namespace ImPlot {
 
 void ShowBenchmarkTool();
 
-inline double RandomRange(double min, double max) {
-    double scale = rand() / (double) RAND_MAX;
-    return min + scale * ( max - min );
+inline float RandomRange(double min, double max) {
+    double scale = rand() / (float) RAND_MAX;
+    return (float)(min + scale * ( max - min ));
 }
 
 // utility structure for realtime plot
